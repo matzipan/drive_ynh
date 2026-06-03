@@ -49,7 +49,12 @@ fi
 #=================================================
 ynh_script_progression "Installing dependencies..."
 
-ynh_hide_warnings corepack enable && corepack prepare yarn@latest --activate
+NVM_DIR=$(ynh_exec_as_app bash -c 'echo "$HOME/.nvm"')
+NODE_VERSION=22
+
+ynh_hide_warnings ynh_exec_as_app bash -c "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash" 1>/dev/null
+
+ynh_hide_warnings ynh_exec_as_app bash -c "source $NVM_DIR/nvm.sh && nvm install $NODE_VERSION && nvm exec corepack enable && nvm exec corepack prepare yarn@latest --activate"
 
 #=================================================
 # DOWNLOAD, CHECK AND UNPACK SOURCE
@@ -62,28 +67,27 @@ ynh_exec_as_app mkdir -p "$install_dir/_build/venv"
 ynh_exec_as_app mkdir -p "$install_dir/_build/frontend"
 ynh_exec_as_app mkdir -p "$install_dir/_build/data/static"
 
-pushd "$install_dir/_build/venv"
-    ynh_exec_as_app python3 -m venv .
-    ynh_hide_warnings ynh_exec_as_app ./bin/pip3 install "$install_dir/src/backend"
-    ynh_hide_warnings ynh_exec_as_app ./bin/pip3 freeze > requirements.txt
-    ynh_hide_warnings ynh_exec_as_app ./bin/pip3 install -r requirements.txt
+pushd "$install_dir/src/backend"
+    ynh_exec_as_app python3 -m venv "$install_dir/_build/venv"
+    ynh_hide_warnings ynh_exec_as_app "$install_dir/_build/venv/bin/pip3" install --upgrade pip setuptools wheel uv
+    ynh_hide_warnings ynh_exec_as_app "$install_dir/_build/venv/bin/uv" sync --locked --no-dev
 popd
 
 # Mail builder
 pushd "$install_dir/src/mail"
-    ynh_hide_warnings ynh_exec_as_app yarn install --frozen-lockfile
-    ynh_hide_warnings ynh_exec_as_app NODE_ENV=production yarn build
+    ynh_hide_warnings ynh_exec_as_app bash -c "source $NVM_DIR/nvm.sh && NODE_VERSION=$NODE_VERSION nvm exec yarn install"
+    ynh_hide_warnings ynh_exec_as_app bash -c "source $NVM_DIR/nvm.sh && NODE_VERSION=$NODE_VERSION NODE_ENV=production nvm exec yarn build"
 popd
 
 pushd "$install_dir/src/backend"
     # Collect the static resources
     ynh_exec_as_app DATA_DIR="$install_dir/_build/data" DJANGO_CONFIGURATION=Build DJANGO_SECRET_KEY=Dummy \
         STATIC_ROOT="$install_dir/src/backend" \
-        "$install_dir/_build/venv/bin/python" manage.py collectstatic --noinput
+        "$install_dir/_build/venv/bin/uv" run manage.py collectstatic --noinput
 
     # Generate compiled translation messages
     ynh_exec_as_app DJANGO_CONFIGURATION=Build \
-        "$install_dir/_build/venv/bin/python" manage.py compilemessages
+        "$install_dir/_build/venv/bin/uv" run manage.py compilemessages
 
     rdfind -makesymlinks true -followsymlinks true -makeresultsfile false "$install_dir/_build/data/static"
     ynh_psql_db_shell <<< "ALTER USER $db_name WITH SUPERUSER;"
@@ -91,19 +95,20 @@ pushd "$install_dir/src/backend"
     ynh_hide_warnings ynh_exec_as_app \
         DJANGO_CONFIGURATION=Production \
         DB_NAME=$db_name DB_USER=$db_name DB_PASSWORD=$db_pwd \
-        "$install_dir/_build/venv/bin/python" manage.py migrate
+        "$install_dir/_build/venv/bin/uv" run manage.py migrate
     ynh_psql_db_shell <<< "ALTER USER $db_name WITH NOSUPERUSER;"
 popd
 
 ynh_script_progression "Setting up frontend source files..."
 
 pushd "$install_dir/src/frontend"
-    ynh_hide_warnings ynh_exec_as_app yarn install
+    ynh_hide_warnings ynh_exec_as_app bash -c "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash"
+
+    ynh_hide_warnings ynh_exec_as_app bash -c "source $NVM_DIR/nvm.sh && NODE_VERSION=$NODE_VERSION nvm exec yarn install"
     pushd "./apps/drive"
-        ynh_hide_warnings ynh_exec_as_app NODE_ENV=production yarn build
+            ynh_hide_warnings ynh_exec_as_app bash -c "source $NVM_DIR/nvm.sh && NODE_VERSION=$NODE_VERSION NODE_ENV=production nvm exec yarn build"
     popd
-    mv ./apps/drive/.next "$install_dir/_build/frontend" 2>/dev/null || true
-    mv ./apps/drive/public "$install_dir/_build/frontend" 2>/dev/null || true
+    mv ./apps/drive/out "$install_dir/_build/frontend" 2>/dev/null
 popd
 
 chown -R "$app:www-data" "$install_dir"
@@ -117,6 +122,8 @@ ynh_config_add --template="env" --destination="$install_dir/.env"
 chmod 400 "$install_dir/.env"
 chown "$app:$app" "$install_dir/.env"
 
+ynh_config_add --template="gunicorn_drive.py" --destination="$install_dir/gunicorn_drive.py"
+
 #=================================================
 # SETUP SYSTEMD
 #=================================================
@@ -125,7 +132,7 @@ ynh_script_progression "Setting up systemd service..."
 ynh_config_add --template="systemd.service" --destination="/etc/systemd/system/$app.service"
 
 systemctl daemon-reload
-systemctl enable "$app.service"
+ynh_systemctl --service="$app" --action="enable"
 
 #=================================================
 # SETUP NGINX
@@ -139,9 +146,7 @@ ynh_config_add --template="nginx.conf" --destination="/etc/nginx/conf.d/$domain.
 #=================================================
 ynh_script_progression "Starting application services..."
 
-ynh_systemd_action --service_name="$app" --action="start"
-
-ynh_systemd_action --service_name=nginx --action="reload"
+ynh_systemctl --service="$app" --action="start"
 
 #=================================================
 # END OF SCRIPT

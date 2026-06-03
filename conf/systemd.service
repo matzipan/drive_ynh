@@ -3,12 +3,12 @@ Description=La Suite - Drive
 After=network.target postgresql.service redis.service
 
 [Service]
-Type=notify
+Type=simple
 User=__APP__
-WorkingDirectory=__INSTALL_DIR__
+WorkingDirectory=__INSTALL_DIR__/src/backend
 Environment="PATH=__INSTALL_DIR__/_build/venv/bin"
 EnvironmentFile=__INSTALL_DIR__/.env
-ExecStart=__INSTALL_DIR__/_build/venv/bin/gunicorn -b 127.0.0.1:__PORT_BACKEND__ drive.wsgi
+ExecStart=__INSTALL_DIR__/_build/venv/bin/uv run gunicorn -c __INSTALL_DIR__/gunicorn_drive.py drive.wsgi:application
 Restart=always
 RestartSec=10
 
