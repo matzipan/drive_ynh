@@ -1,0 +1,62 @@
+#!/bin/bash
+
+#=================================================
+# IMPORT GENERIC HELPERS
+#=================================================
+
+source _common.sh
+source /usr/share/yunohost/helpers
+
+#=================================================
+# RESTORE THE APP MAIN DIR
+#=================================================
+ynh_script_progression "Restoring app main directory..."
+
+ynh_restore_file --origin_path="$install_dir"
+
+#=================================================
+# RESTORE THE POSTGRESQL DATABASE
+#=================================================
+ynh_script_progression "Restoring PostgreSQL database..."
+
+ynh_psql_connect_as --user="$db_name" --password="$db_pwd" --database="$db_name" < ./db.sql
+
+#=================================================
+# RESTORE SYSTEMD
+#=================================================
+ynh_script_progression "Restoring systemd configuration..."
+
+ynh_restore_file --origin_path="/etc/systemd/system/$app.service"
+systemctl daemon-reload
+systemctl enable "$app.service"
+
+#=================================================
+# RESTORE NGINX CONFIGURATION
+#=================================================
+ynh_script_progression "Restoring nginx configuration..."
+
+ynh_restore_file --origin_path="/etc/nginx/conf.d/$domain.d/$app.conf"
+
+#=================================================
+# RECONFIGURE APP
+#=================================================
+ynh_script_progression "Reconfiguring application..."
+
+ynh_config_add --template="env" --destination="$install_dir/.env"
+chmod 400 "$install_dir/.env"
+chown "$app:$app" "$install_dir/.env"
+
+chown -R "$app:www-data" "$install_dir"
+
+#=================================================
+# START APP SERVICES
+#=================================================
+ynh_script_progression "Starting services..."
+
+ynh_systemd_action --service_name="$app" --action="start"
+ynh_systemd_action --service_name=nginx --action="reload"
+
+#=================================================
+# END OF SCRIPT
+#=================================================
+ynh_script_progression "Restoration of $app completed"

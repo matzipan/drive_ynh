@@ -1,0 +1,17 @@
+# YunoHost specific
+backup_*.tar.gz
+/doc/screenshots/*.jpg
+/doc/screenshots/*.png
+
+# Git
+.git
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

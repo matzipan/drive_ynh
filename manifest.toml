@@ -1,0 +1,82 @@
+#:schema https://raw.githubusercontent.com/YunoHost/apps/main/schemas/manifest.v2.schema.json
+
+packaging_format = 2
+
+id = "lasuite-drive"
+name = "La Suite - Drive"
+description.en = "Secure, collaborative file storage and sharing"
+description.fr = "Stockage et partage de fichiers collaboratif et sécurisé"
+
+version = "0.18.0~ynh1"
+
+maintainers = ["matzipan"]
+
+[upstream]
+license = "AGPL-3.0-or-later"
+website = "https://drive.numerique.gouv.fr"
+demo = "https://drive.numerique.gouv.fr"
+code = "https://github.com/suitenumerique/drive/"
+
+[integration]
+yunohost = ">= 12.1.17"
+helpers_version = "2.1"
+architectures = ["amd64", "arm64", "armhf"]
+multi_instance = true
+
+ldap = false
+sso = true
+
+disk = "2000M"
+ram.build = "2000M"
+ram.runtime = "400M"
+
+[install]
+    [install.s3]
+    type = "app"
+    filter = "match(id, '^(minio|garage)(__[0-9+])?$')"
+    ask.en = "Select the S3 app (Garage or Minio) that will handle storage."
+    ask.fr = "Sélectionnez l'app S3 (Garage ou Minio) qui gérera le stockage."
+    help.en = "You need to have at least one instance of Garage or Minio installed beforehand on your server."
+    help.fr = "Vous devez avoir au moins une instance de Garage ou Minio préalablement installée sur votre serveur."
+
+    [install.domain]
+    type = "domain"
+
+    [install.init_main_permission]
+    type = "group"
+    default = "visitors"
+
+    [install.language]
+    ask.en = "Choose the application language"
+    ask.fr = "Choisissez la langue de l'application"
+    type = "select"
+    choices = ["en", "fr"]
+    default = "en"
+
+[resources]
+    [resources.sources]
+
+    [resources.sources.main]
+    url = "https://github.com/suitenumerique/drive/archive/refs/tags/v0.18.0.tar.gz"
+    sha256 = "cf367b34d14f385c9e99f8d033828a1c8c7214fa9ec7413532140590a866778f"
+    autoupdate.strategy = "latest_github_tag"
+
+    [resources.system_user]
+    allow_email = true
+
+    [resources.install_dir]
+
+    [resources.permissions]
+    main.url = "/"
+
+    [resources.ports]
+    backend.default = 8000
+
+    [resources.apt]
+    packages = "redis, python3, python3-venv, python3-setuptools, python3-pip, postgresql, rdfind, gettext"
+
+    [resources.database]
+    type = "postgresql"
+
+    [resources.nodejs]
+    version = "20"

@@ -1,0 +1,7 @@
+#:schema https://github.com/YunoHost/apps/raw/main/schemas/config_panel.v1.schema.json
+version = "1.0"
+
+[main]
+name.en = "Main settings"
+name.fr = "Configuration principale"
+services = ["__APP__"]

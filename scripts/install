@@ -1,0 +1,149 @@
+#!/bin/bash
+
+#=================================================
+# IMPORT GENERIC HELPERS
+#=================================================
+
+source _common.sh
+source /usr/share/yunohost/helpers
+
+#=================================================
+# SETUP S3 FOR STORAGE
+#=================================================
+setup_s3
+
+#=================================================
+# INITIALIZE AND STORE SETTINGS
+#=================================================
+
+redis_db=$(ynh_redis_get_free_db)
+redis-cli -n "$redis_db" SET __YNH_PROVISIONED "$app"
+django_secret_key=$(ynh_string_random -l 32)
+ynh_app_setting_set --key=redis_db --value=$redis_db
+ynh_app_setting_set --key=django_secret_key --value=$django_secret_key
+get_s3_credentials
+celery_broker_url=$(get_celery_broker_url)
+
+#=================================================
+# APP INITIAL CONFIGURATION
+#=================================================
+ynh_script_progression "Creating S3 Bucket"
+
+s3="${s3:-minio}"
+
+if [[ "${s3}" =~ minio* ]]; then
+    s3_domain=$(ynh_app_setting_get --key=s3_domain)
+    s3_local_port=$(ynh_app_setting_get --key=s3_local_port)
+    s3_password=$(ynh_app_setting_get --key=s3_password)
+    s3_user=$(ynh_app_setting_get --key=s3_user)
+
+    # Create bucket using Minio admin
+    ynh_app_setting_set --key="s3_domain" --value="$s3_domain"
+    ynh_app_setting_set --key="s3_local_port" --value="$s3_local_port"
+else
+    ynh_die "Garage not yet supported"
+fi
+
+#=================================================
+# INSTALL DEPENDENCIES
+#=================================================
+ynh_script_progression "Installing dependencies..."
+
+ynh_hide_warnings corepack enable && corepack prepare yarn@latest --activate
+
+#=================================================
+# DOWNLOAD, CHECK AND UNPACK SOURCE
+#=================================================
+ynh_script_progression "Setting up backend source files..."
+
+ynh_setup_source --dest_dir="$install_dir"
+
+ynh_exec_as_app mkdir -p "$install_dir/_build/venv"
+ynh_exec_as_app mkdir -p "$install_dir/_build/frontend"
+ynh_exec_as_app mkdir -p "$install_dir/_build/data/static"
+
+pushd "$install_dir/_build/venv"
+    ynh_exec_as_app python3 -m venv .
+    ynh_hide_warnings ynh_exec_as_app ./bin/pip3 install "$install_dir/src/backend"
+    ynh_hide_warnings ynh_exec_as_app ./bin/pip3 freeze > requirements.txt
+    ynh_hide_warnings ynh_exec_as_app ./bin/pip3 install -r requirements.txt
+popd
+
+# Mail builder
+pushd "$install_dir/src/mail"
+    ynh_hide_warnings ynh_exec_as_app yarn install --frozen-lockfile
+    ynh_hide_warnings ynh_exec_as_app NODE_ENV=production yarn build
+popd
+
+pushd "$install_dir/src/backend"
+    # Collect the static resources
+    ynh_exec_as_app DATA_DIR="$install_dir/_build/data" DJANGO_CONFIGURATION=Build DJANGO_SECRET_KEY=Dummy \
+        STATIC_ROOT="$install_dir/src/backend" \
+        "$install_dir/_build/venv/bin/python" manage.py collectstatic --noinput
+
+    # Generate compiled translation messages
+    ynh_exec_as_app DJANGO_CONFIGURATION=Build \
+        "$install_dir/_build/venv/bin/python" manage.py compilemessages
+
+    rdfind -makesymlinks true -followsymlinks true -makeresultsfile false "$install_dir/_build/data/static"
+    ynh_psql_db_shell <<< "ALTER USER $db_name WITH SUPERUSER;"
+    # Setup the database
+    ynh_hide_warnings ynh_exec_as_app \
+        DJANGO_CONFIGURATION=Production \
+        DB_NAME=$db_name DB_USER=$db_name DB_PASSWORD=$db_pwd \
+        "$install_dir/_build/venv/bin/python" manage.py migrate
+    ynh_psql_db_shell <<< "ALTER USER $db_name WITH NOSUPERUSER;"
+popd
+
+ynh_script_progression "Setting up frontend source files..."
+
+pushd "$install_dir/src/frontend"
+    ynh_hide_warnings ynh_exec_as_app yarn install
+    pushd "./apps/drive"
+        ynh_hide_warnings ynh_exec_as_app NODE_ENV=production yarn build
+    popd
+    mv ./apps/drive/.next "$install_dir/_build/frontend" 2>/dev/null || true
+    mv ./apps/drive/public "$install_dir/_build/frontend" 2>/dev/null || true
+popd
+
+chown -R "$app:www-data" "$install_dir"
+
+#=================================================
+# APP INITIAL CONFIGURATION
+#=================================================
+ynh_script_progression "Adding $app's configuration files..."
+
+ynh_config_add --template="env" --destination="$install_dir/.env"
+chmod 400 "$install_dir/.env"
+chown "$app:$app" "$install_dir/.env"
+
+#=================================================
+# SETUP SYSTEMD
+#=================================================
+ynh_script_progression "Setting up systemd service..."
+
+ynh_config_add --template="systemd.service" --destination="/etc/systemd/system/$app.service"
+
+systemctl daemon-reload
+systemctl enable "$app.service"
+
+#=================================================
+# SETUP NGINX
+#=================================================
+ynh_script_progression "Configuring NGINX web server..."
+
+ynh_config_add --template="nginx.conf" --destination="/etc/nginx/conf.d/$domain.d/$app.conf"
+
+#=================================================
+# START APP SERVICES
+#=================================================
+ynh_script_progression "Starting application services..."
+
+ynh_systemd_action --service_name="$app" --action="start"
+
+ynh_systemd_action --service_name=nginx --action="reload"
+
+#=================================================
+# END OF SCRIPT
+#=================================================
+ynh_script_progression "Installation of $app completed"

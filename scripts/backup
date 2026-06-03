@@ -1,0 +1,41 @@
+#!/bin/bash
+
+#=================================================
+# IMPORT GENERIC HELPERS
+#=================================================
+
+source _common.sh
+source /usr/share/yunohost/helpers
+
+#=================================================
+# BACKUP THE APP MAIN DIR
+#=================================================
+ynh_script_progression "Backing up app main directory..."
+
+ynh_backup --src_path="$install_dir"
+
+#=================================================
+# BACKUP THE POSTGRESQL DATABASE
+#=================================================
+ynh_script_progression "Backing up PostgreSQL database..."
+
+ynh_psql_dump_db --database="$db_name" > db.sql
+
+#=================================================
+# BACKUP SYSTEMD
+#=================================================
+ynh_script_progression "Backing up systemd configuration..."
+
+ynh_backup --src_path="/etc/systemd/system/$app.service"
+
+#=================================================
+# BACKUP NGINX CONFIGURATION
+#=================================================
+ynh_script_progression "Backing up nginx configuration..."
+
+ynh_backup --src_path="/etc/nginx/conf.d/$domain.d/$app.conf"
+
+#=================================================
+# END OF SCRIPT
+#=================================================
+ynh_script_progression "Backup of $app completed"
