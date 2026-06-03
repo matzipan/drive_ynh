@@ -31,6 +31,14 @@ ram.build = "2000M"
 ram.runtime = "400M"
 
 [install]
+    [install.dex]
+    type = "app"
+    filter = "match(id, '^(dex)(__[0-9+])?$')"
+    ask.en = "Select the Dex app that will handle authentication."
+    ask.fr = "Sélectionnez l'app Dex qui gérera l'authentification."
+    help.en = "You need to have at least one instance of Dex installed beforehand on your server."
+    help.fr = "Vous devez avoir au moins une instance de Dex préalablement installée sur votre serveur."
+
     [install.s3]
     type = "app"
     filter = "match(id, '^(minio|garage)(__[0-9+])?$')"
